@@ -53,7 +53,11 @@ router.post('/login', (req, res) => {
             { expiresIn: '1h' }
         );
 
-        res.json({ message: 'Inicio de sesión exitoso', token });
+        res.json({ 
+            message: 'Inicio de sesión exitoso', 
+            token, 
+            role: user.role // 👈 Agrega esto
+          });
     });
 });
 
