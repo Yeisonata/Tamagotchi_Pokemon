@@ -1,8 +1,7 @@
 require("dotenv").config();
 const express = require("express");
-const cors = require("cors");
+const cors = require('cors');
 
-// Importa solo el router desde authRoutes y las demás rutas correctamente
 const poketRoutes = require("./routes/poketRoutes");
 const { router: authRoutes } = require("./routes/authRoutes");
 const userRoutes = require("./routes/userRoutes");
@@ -11,8 +10,14 @@ const db = require("./config/db");
 
 const app = express();
 
+// 🛡️ Configura CORS para permitir acceso desde React
+
+app.use(cors({
+  origin: 'http://localhost:5173',  // O el puerto de tu frontend
+  credentials: true,
+}));
+
 app.use(express.json());
-app.use(cors());
 
 // 🔹 Enlazamos correctamente las rutas
 app.use("/pet", poketRoutes);

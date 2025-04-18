@@ -26,40 +26,43 @@ router.post('/register', async (req, res) => {
         res.status(500).json({ error: 'Error al procesar la solicitud' });
     }
 });
-
-// 🔹 Inicio de sesión
 router.post('/login', (req, res) => {
-    const { email, password } = req.body;
-
-    db.query('SELECT * FROM user WHERE email = ?', [email], async (err, results) => {
-        if (err) return res.status(500).json({ error: 'Error en la BD' });
-
-        if (results.length === 0) {
-            return res.status(401).json({ error: 'Usuario no encontrado' });
-        }
-
-        const user = results[0];
-
-        // Comparar la contraseña
-        const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) {
-            return res.status(401).json({ error: 'Contraseña incorrecta' });
-        }
-
-        // Generar JWT
-        const token = jwt.sign(
-            { id: user.id, username: user.username, role: user.role },
-            JWT_SECRET,
-            { expiresIn: '1h' }
-        );
-
-        res.json({ 
-            message: 'Inicio de sesión exitoso', 
-            token, 
-            role: user.role // 👈 Agrega esto
-          });
+    const { username, email, password } = req.body;
+  
+    // Verifica si se envió el email o el username
+    const query = email ? 'SELECT * FROM user WHERE email = ?' : 'SELECT * FROM user WHERE username = ?';
+    const value = email || username;
+  
+    db.query(query, [value], async (err, results) => {
+      if (err) return res.status(500).json({ error: 'Error en la BD' });
+  
+      if (results.length === 0) {
+        return res.status(401).json({ error: 'Usuario no encontrado' });
+      }
+  
+      const user = results[0];
+  
+      // Comparar la contraseña
+      const isMatch = await bcrypt.compare(password, user.password);
+      if (!isMatch) {
+        return res.status(401).json({ error: 'Contraseña incorrecta' });
+      }
+  
+      // Generar JWT
+      const token = jwt.sign(
+        { id: user.id, username: user.username, role: user.role },
+        JWT_SECRET,
+        { expiresIn: '1h' }
+      );
+  
+      res.json({ 
+        message: 'Inicio de sesión exitoso', 
+        token, 
+        role: user.role // 👈 Agrega esto
+      });
     });
-});
+  });
+  
 
 // 🔹 Middleware de autenticación
 const authenticateToken = (req, res, next) => {
