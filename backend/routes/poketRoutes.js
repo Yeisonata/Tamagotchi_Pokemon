@@ -3,6 +3,7 @@ const axios = require("axios");
 const db = require("../config/db");
 const fs = require("fs");
 const { authenticateToken } = require("./authRoutes"); // ✅ Importar autenticación
+const { checkCooldown } = require("../middlewares/authMiddleware");
 
 const router = express.Router();
 
@@ -21,6 +22,7 @@ const expTable = Array.from({ length: maxLevel + 1 }, (_, lvl) =>
   Math.floor((lvl ** 3 * maxExp) / maxLevel ** 3)
 );
 
+// 🔹 Obtener todos los Pokémon de la PokéAPI
 async function updateLevelAndEvolution(pet_id, expGained) {
   try {
     const [petRows] = await db
@@ -60,6 +62,9 @@ async function updateLevelAndEvolution(pet_id, expGained) {
   }
 }
 
+//Cooldown de acciones
+
+//Evoluciones
 async function checkEvolution(pet_id, species_id, newLevel) {
   try {
     console.log(
@@ -192,84 +197,94 @@ const interactions = {
   train: { ph: -15, happiness: -5, experience: 30 },
   heal: { ph: 50, happiness: 10 },
   explore: { ph: -5, happiness: 10, experience: 25 },
-  sleep: { ph: 30, happiness: -5 }
+  sleep: { ph: 30, happiness: -5 },
 };
 
 // 🔹 Interactuar con una mascota (Solo usuarios autenticados
 Object.entries(interactions).forEach(([action, changes]) => {
-  router.post(`/${action}/:pet_id`, authenticateToken, async (req, res) => {
-    try {
-      const { pet_id } = req.params;
-      let query = "UPDATE pet SET ";
-      let values = [];
+  router.post(
+    `/${action.toLowerCase()}/:pet_id`,
+    authenticateToken,
+    async (req, res) => {
+      try {
+        const { pet_id } = req.params;
 
-      if (changes.ph !== undefined) {
-        query += "ph = LEAST(GREATEST(ph + ?, 0), 100), ";
-        values.push(changes.ph);
-      }
+        // Verificar cooldown
+        const allowed = await checkCooldown(pet_id, action);
+        if (!allowed) {
+          return res.status(429).json({
+            message: `🐢 Espera un poco antes de volver a ${action.toLowerCase()}.`,
+          });
+        }
 
-      if (changes.happiness !== undefined) {
-        query += "happiness = LEAST(GREATEST(happiness + ?, 0), 100), ";
-        values.push(changes.happiness);
-      }
+        // Construir query para actualizar stats
+        let query = "UPDATE pet SET ";
+        let values = [];
 
-      if (changes.experience !== undefined) {
-        query += "experience = experience + ?, ";
-        values.push(changes.experience);
-      }
+        if (changes.ph !== undefined) {
+          query += "ph = LEAST(GREATEST(ph + ?, 0), 100), ";
+          values.push(changes.ph);
+        }
 
-      // ✅ Elimina coma final de forma segura
-      query = query.replace(/, $/, '') + " WHERE id = ?";
-      values.push(pet_id);
+        if (changes.happiness !== undefined) {
+          query += "happiness = LEAST(GREATEST(happiness + ?, 0), 100), ";
+          values.push(changes.happiness);
+        }
 
-      // ✅ Ejecutar UPDATE
-      await db.promise().query(query, values);
-      console.log(`Mascota ${pet_id} ha realizado acción: ${action}`);
+        if (changes.experience !== undefined) {
+          query += "experience = experience + ?, ";
+          values.push(changes.experience);
+        }
 
-      // ✅ Verifica evolución y nivel si aplica
-      if (changes.experience) {
-        await updateLevelAndEvolution(pet_id, changes.experience);
-      }
+        query = query.replace(/, $/, "") + " WHERE id = ?";
+        values.push(pet_id);
 
-      // ✅ Obtener datos actualizados
-      const [updatedRows] = await db
-        .promise()
-        .query(
-          `SELECT 
-            pet.*, 
-            species.specie_name AS specie_name 
-           FROM 
-            pet 
-           JOIN 
-            species ON pet.species_id = species.id 
-           WHERE 
-            pet.id = ?`,
+        await db.promise().query(query, values);
+        console.log(`Mascota ${pet_id} ha realizado acción: ${action}`);
+
+        // Registrar acción para cooldown
+        await db
+          .promise()
+          .query(
+            "INSERT INTO action_log (pet_id, action_type, last_performed) VALUES (?, ?, NOW())",
+            [pet_id, action.toUpperCase()]
+          );
+
+        // Actualizar nivel y evolución
+        if (changes.experience) {
+          await updateLevelAndEvolution(pet_id, changes.experience);
+        }
+
+        // Obtener datos actualizados de la mascota
+        const [updatedRows] = await db.promise().query(
+          `SELECT pet.*, species.specie_name AS specie_name 
+         FROM pet 
+         JOIN species ON pet.species_id = species.id 
+         WHERE pet.id = ?`,
           [pet_id]
         );
 
-      if (updatedRows.length === 0) {
-        return res.status(404).json({ error: "Mascota no encontrada" });
+        if (updatedRows.length === 0) {
+          return res.status(404).json({ error: "Mascota no encontrada" });
+        }
+
+        const updatedPet = updatedRows[0];
+
+        // Obtener tipos desde la PokéAPI
+        const pokeResponse = await axios.get(
+          `https://pokeapi.co/api/v2/pokemon/${updatedPet.specie_name.toLowerCase()}`
+        );
+
+        const types = pokeResponse.data.types.map((t) => t.type.name);
+
+        res.json({ ...updatedPet, types });
+      } catch (error) {
+        console.error(`Error en acción ${action}:`, error);
+        res.status(500).json({ error: `Error al procesar ${action}` });
       }
-
-      const updatedPet = updatedRows[0];
-
-      // ✅ Obtener tipos desde la PokéAPI usando el nombre de la especie
-      const pokeResponse = await axios.get(
-        `https://pokeapi.co/api/v2/pokemon/${updatedPet.specie_name.toLowerCase()}`
-      );
-
-      const types = pokeResponse.data.types.map((t) => t.type.name);
-
-      // ✅ Devolver mascota con tipos
-      res.json({ ...updatedPet, types });
-
-    } catch (error) {
-      console.error(`Error en acción ${action}:`, error);
-      res.status(500).json({ error: `Error al procesar ${action}` });
     }
-  });
+  );
 });
-
 
 // 🔹 Crear una nueva mascota (Solo usuarios autenticados)
 router.post("/create", authenticateToken, (req, res) => {
@@ -331,7 +346,6 @@ router.delete("/delete/:pet_id", authenticateToken, (req, res) => {
 
 // 🔹 Obtener todas las mascotas del usuario autenticado
 router.get("/user", authenticateToken, (req, res) => {
- 
   const user_id = req.user.id;
 
   db.query(
@@ -361,20 +375,18 @@ router.get("/user", authenticateToken, (req, res) => {
 });
 
 // 🔹 Obtener un Pokémon específico de un usuario (Requiere autenticación)
- router.get("/user/:pet_id", authenticateToken, async (req, res) => {
+router.get("/user/:pet_id", authenticateToken, async (req, res) => {
   const user_id = req.user.id;
   const pet_id = req.params.pet_id;
 
   try {
-    const [results] = await db
-      .promise()
-      .query(
-        `SELECT p.id, p.alias, s.specie_name, p.location, p.happiness, p.ph, p.experience, p.lvl         
+    const [results] = await db.promise().query(
+      `SELECT p.id, p.alias, s.specie_name, p.location, p.happiness, p.ph, p.experience, p.lvl         
          FROM pet p
          JOIN species s ON p.species_id = s.id
          WHERE p.user_id = ? AND p.id = ?`,
-        [user_id, pet_id]
-      );
+      [user_id, pet_id]
+    );
 
     if (results.length === 0) {
       return res.status(404).json({ error: "Mascota no encontrada" });
@@ -399,6 +411,6 @@ router.get("/user", authenticateToken, (req, res) => {
     console.error("Error al obtener la mascota:", err);
     res.status(500).json({ error: "Error interno del servidor" });
   }
-}); 
+});
 
 module.exports = router;

@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-
+const db = require("../config/db");
 const authMiddleware = (req, res, next) => {
     const token = req.header('Authorization');
 
@@ -23,5 +23,36 @@ const isAdmin = (req, res, next) => {
     }
     next();
 };
+// Tiempos de cooldown para cada acción (en ms)
+const ACTION_COOLDOWNS = {
+  FEED: 5 * 60 * 1000,      // 5 minutos
+  PLAY: 4 * 60 * 1000,      // 4 minutos
+  TRAIN: 3 * 60 * 1000,     // 3 minutos
+  EXPLORE: 2 * 60 * 1000,   // 2 minutos
+  HEAL: 1 * 60 * 1000,      // 1 minuto
+  SLEEP: 4.5 * 60 * 1000    // 4.5 minutos
+};
 
-module.exports = { authMiddleware, isAdmin };
+// Función para verificar cooldown
+async function checkCooldown(pet_id, action) {
+  const [rows] = await db
+    .promise()
+    .query(
+      `SELECT last_performed FROM action_log 
+       WHERE pet_id = ? AND action_type = ?
+       ORDER BY last_performed DESC LIMIT 1`,
+      [pet_id, action.toUpperCase()]
+    );
+
+  if (rows.length === 0) return true;
+
+  const lastActionTime = new Date(rows[0].last_performed).getTime();
+  const now = Date.now();
+  const cooldown = ACTION_COOLDOWNS[action.toUpperCase()];
+
+  return (now - lastActionTime) >= cooldown;
+}
+
+
+
+module.exports = { authMiddleware, isAdmin, checkCooldown };
