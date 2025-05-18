@@ -37,15 +37,15 @@ router.get('/', authenticateToken, (req, res) => {
 });
 
 // 🔹 Obtener las mascotas de un usuario por su ID
-router.get('/:id/pets', authenticateToken, (req, res) => {
-    const { id } = req.params;
+router.get('/user', authenticateToken, (req, res) => {
+    const userId = req.user.id; // viene del token
 
     db.query(
         `SELECT pet.id, pet.alias, species.specie_name, pet.lvl, pet.experience, pet.happiness, pet.ph 
          FROM pet 
          INNER JOIN species ON pet.species_id = species.id 
          WHERE pet.user_id = ?`, 
-        [id], 
+        [userId], 
         (err, results) => {
             if (err) return res.status(500).json({ error: 'Error al obtener las mascotas' });
 
@@ -58,19 +58,8 @@ router.get('/:id/pets', authenticateToken, (req, res) => {
     );
 });
 
+
 // 🔹 Eliminar una mascota de un usuario
-router.delete('/:id/pets/:petId', authenticateToken, (req, res) => {
-    const { id, petId } = req.params;
 
-    db.query('DELETE FROM pet WHERE id = ? AND user_id = ?', [petId, id], (err, result) => {
-        if (err) return res.status(500).json({ error: 'Error al eliminar la mascota' });
-
-        if (result.affectedRows === 0) {
-            return res.status(404).json({ error: 'Mascota no encontrada o no pertenece al usuario' });
-        }
-
-        res.json({ message: 'Mascota eliminada correctamente' });
-    });
-});
 
 module.exports = router;

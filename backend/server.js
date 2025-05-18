@@ -12,10 +12,13 @@ const app = express();
 
 // 🛡️ Configura CORS para permitir acceso desde React
 
-app.use(cors({
-  origin: 'http://localhost:5173',  // O el puerto de tu frontend
-  credentials: true,
-}));
+const corsOptions = {
+  origin: ['http://localhost:3000', 'http://localhost:5173'],  // Permite ambas URLs
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  credentials: true, // Si estás enviando cookies o tokens
+};
+
+app.use(cors(corsOptions));
 
 app.use(express.json());
 
