@@ -27,9 +27,9 @@ const isAdmin = (req, res, next) => {
 const ACTION_COOLDOWNS = {
   FEED: 5 * 60 * 1000,      // 5 minutos
   PLAY: 4 * 60 * 1000,      // 4 minutos
-  TRAIN: 3 * 60 * 1000,     // 3 minutos
+  TRAIN: 0.1 * 60 * 1000,     // 3 minutos
   EXPLORE: 2 * 60 * 1000,   // 2 minutos
-  HEAL: 1 * 60 * 1000,      // 1 minuto
+  HEAL: 0.1 * 60 * 1000,      // 1 minuto
   SLEEP: 4.5 * 60 * 1000    // 4.5 minutos
 };
 

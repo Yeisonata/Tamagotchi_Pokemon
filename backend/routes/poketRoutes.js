@@ -38,8 +38,14 @@ async function updateLevelAndEvolution(pet_id, expGained) {
     let newLevel = lvl;
     let evolved = false;
 
-    while (newLevel < maxLevel && experience >= expTable[newLevel + 1]) {
+    // Consumimos la experiencia necesaria para subir de nivel
+    while (
+      newLevel < maxLevel &&
+      experience >= expTable[newLevel + 1]
+    ) {
+      experience -= expTable[newLevel + 1]; // 👈 Resta la experiencia del nivel alcanzado
       newLevel++;
+
       const didEvolve = await checkEvolution(pet_id, species_id, newLevel);
       if (didEvolve) evolved = true;
     }
@@ -62,6 +68,7 @@ async function updateLevelAndEvolution(pet_id, expGained) {
   }
 }
 
+
 //Cooldown de acciones
 
 //Evoluciones
@@ -71,44 +78,93 @@ async function checkEvolution(pet_id, species_id, newLevel) {
       `Comprobando evolución para especie ID ${species_id} en nivel ${newLevel}`
     );
 
-    // Si es Eevee (ID 133), manejamos la evolución manualmente
-    if (species_id === 133) {
-      console.log(
-        "✨ Eevee ha alcanzado un nivel de evolución. Debes elegir su evolución manualmente."
-      );
+    // Si es Eevee (ID 10 según tu tabla)
+    if (species_id === 10 && newLevel >= 8) {
+      console.log("✨ Eevee ha alcanzado un nivel de evolución. Se elegirá una evolución aleatoria.");
 
-      // Lista fija de evoluciones válidas de Eevee
-      const eeveeVariants = [
-        "Vaporeon",
-        "Jolteon",
-        "Flareon",
-        "Espeon",
-        "Umbreon",
-        "Leafeon",
-        "Glaceon",
-        "Sylveon",
-      ];
+      // IDs de evoluciones posibles de Eevee en tu base de datos
+      const eeveeVariantIds = [11, 12, 13, 14, 15, 16, 17, 18];
 
-      // Obtener todas las especies para buscar los IDs
       const [rows] = await db
         .promise()
-        .query(
-          "SELECT id, species_name FROM species WHERE species_name IN (?)",
-          [eeveeVariants]
-        );
+        .query("SELECT id, specie_name FROM species WHERE id IN (?)", [
+          eeveeVariantIds,
+        ]);
 
-      // Mapear resultado a objetos { id, name }
-      const eeveeEvolutions = rows.map((row) => ({
-        id: row.id,
-        name: row.species_name,
-      }));
+      // Elegimos una evolución aleatoria
+      const randomEvolution = rows[Math.floor(Math.random() * rows.length)];
 
-      console.log("📜 Opciones de evolución para Eevee:", eeveeEvolutions);
+      // Obtenemos detalles visuales desde la PokéAPI (opcional)
+      const evolvedResponse = await axios.get(
+        `https://pokeapi.co/api/v2/pokemon/${randomEvolution.specie_name.toLowerCase()}`
+      );
 
-      return { manual: true, evolutions: eeveeEvolutions };
+      const evolvedPokemonData = {
+        id: randomEvolution.id,
+        name: randomEvolution.specie_name,
+        types: evolvedResponse.data.types.map((t) => t.type.name),
+        image: evolvedResponse.data.sprites.front_default,
+      };
+
+      // Actualizamos la especie en la base de datos
+      await db
+        .promise()
+        .query("UPDATE pet SET species_id = ? WHERE id = ?", [
+          evolvedPokemonData.id,
+          pet_id,
+        ]);
+
+      console.log(`🎉 ¡Eevee ha evolucionado a ${evolvedPokemonData.name.toUpperCase()}!`);
+      console.log(`🔥 Tipos: ${evolvedPokemonData.types.join(", ")}`);
+      console.log(`🖼️ Imagen: ${evolvedPokemonData.image}`);
+
+      return evolvedPokemonData;
+      // Obtener felicidad actual de la mascota
+const [petData] = await db.promise().query("SELECT happiness FROM pet WHERE id = ?", [pet_id]);
+const currentHappiness = petData[0]?.happiness || 0;
+
+// Si felicidad ≥ 220, evolucionar por amistad
+if (currentHappiness >= 220) {
+  // Aquí puedes controlar por día o noche si quieres (opcional)
+  const isDaytime = new Date().getHours() >= 6 && new Date().getHours() < 18;
+  const evoName = isDaytime ? "Espeon" : "Umbreon";
+
+  const [rows] = await db.promise().query(
+    "SELECT id, specie_name FROM species WHERE LOWER(specie_name) = ?",
+    [evoName.toLowerCase()]
+  );
+
+  const evolution = rows[0];
+
+  const evolvedResponse = await axios.get(
+    `https://pokeapi.co/api/v2/pokemon/${evolution.specie_name.toLowerCase()}`
+  );
+
+  const evolvedPokemonData = {
+    id: evolution.id,
+    name: evolution.specie_name,
+    types: evolvedResponse.data.types.map((t) => t.type.name),
+    image: evolvedResponse.data.sprites.front_default,
+  };
+
+  await db
+    .promise()
+    .query("UPDATE pet SET species_id = ? WHERE id = ?", [
+      evolvedPokemonData.id,
+      pet_id,
+    ]);
+
+  console.log(`✨ Eevee ha evolucionado por amistad a ${evolvedPokemonData.name}!`);
+  return evolvedPokemonData;
+}
+
     }
+    // tengo una felicadad mayor a 200 evolucionar espeon  o umbreon
+    
+    
+    
 
-    // 🔹 Si NO es Eevee, seguimos con la evolución normal
+    // 🔹 Si NO es Eevee, usamos PokéAPI para buscar evolución según nivel
     const speciesResponse = await axios.get(
       `https://pokeapi.co/api/v2/pokemon-species/${species_id}/`
     );
@@ -137,10 +193,19 @@ async function checkEvolution(pet_id, species_id, newLevel) {
               (detail) => detail.min_level === newLevel
             )
           ) {
-            evolvedSpeciesId = parseInt(
-              evolution.species.url.split("/").slice(-2, -1)[0]
-            );
             evolvedSpeciesName = evolution.species.name;
+
+            // Buscar el ID correspondiente en tu base de datos
+            const [rows] = await db
+              .promise()
+              .query(
+                "SELECT id FROM species WHERE LOWER(specie_name) = ?",
+                [evolvedSpeciesName.toLowerCase()]
+              );
+
+            if (rows.length > 0) {
+              evolvedSpeciesId = rows[0].id;
+            }
             break;
           }
         }
@@ -151,11 +216,12 @@ async function checkEvolution(pet_id, species_id, newLevel) {
 
     if (evolvedSpeciesId) {
       const evolvedResponse = await axios.get(
-        `https://pokeapi.co/api/v2/pokemon/${evolvedSpeciesId}/`
+        `https://pokeapi.co/api/v2/pokemon/${evolvedSpeciesName}`
       );
+
       evolvedPokemonData = {
-        id: evolvedResponse.data.id,
-        name: evolvedResponse.data.name,
+        id: evolvedSpeciesId,
+        name: evolvedSpeciesName,
         types: evolvedResponse.data.types.map((t) => t.type.name),
         image: evolvedResponse.data.sprites.front_default,
       };
@@ -169,12 +235,10 @@ async function checkEvolution(pet_id, species_id, newLevel) {
 
       console.log(`🎉 ¡Tu Pokémon ha evolucionado! 🎉`);
       console.log(
-        `📌 Nuevo Pokémon: ${evolvedPokemonData.name.toUpperCase()} (ID: ${
-          evolvedPokemonData.id
-        })`
+        `📌 Nuevo Pokémon: ${evolvedPokemonData.name.toUpperCase()} (ID: ${evolvedPokemonData.id})`
       );
       console.log(`🔥 Tipos: ${evolvedPokemonData.types.join(", ")}`);
-      console.log(`\n🖼️ Imagen: ${evolvedPokemonData.image}`);
+      console.log(`🖼️ Imagen: ${evolvedPokemonData.image}`);
 
       return evolvedPokemonData;
     } else {
@@ -186,6 +250,7 @@ async function checkEvolution(pet_id, species_id, newLevel) {
     return null;
   }
 }
+
 
 // 🔹 Evolucionar un Eevee a una de sus evoluciones (Solo usuarios autenticados)
 
